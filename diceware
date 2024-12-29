@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+
+err () {
+	echo "[$(date +'%Y-%m-%dT%H:%M:%S%z')]: Diceware: $*" >&2;
+}
+
+usage () {
+	cat <<EOF
+Usage: ${0##*/} [-d delimiting_character][-l|-s][-w word_number]
+OPTIONS:
+    [ -d | --delim ] Sets delimiter between words. (Default: ' ')
+    [ -h | --help  ] Usage information.
+    [ -l | --large ] Generate with large wordlist. (Default)
+    [ -s | --short ] Generate with short wordlist.
+    [ -w | --words ] Number of words to generate.  (Default: 6)
+                     (WARNING: Anything less than 5 is considered insecure.)
+EOF
+}
+
+check-deps () {
+	getopt -T &>/dev/null && rc=$? || rc=$?;
+	if ! [ "$rc" -eq 4 ]; then
+		err "This script requires GNU getopt";
+		exit 1;
+	fi
+	local lists=0;
+	local nowget=0;
+	if [ -s "${XDG_DATA_HOME}/diceware/eff_large_wordlist.txt" ] && [ -s "${XDG_DATA_HOME}/diceware/eff_short_wordlist_2_0.txt" ]; then
+		lists=1;
+	else
+		echo "Wordlists not found. Attempting to download them.";
+		mkdir -p "${XDG_DATA_HOME}/diceware";
+		if ! wget -h &>/dev/null; then
+			((nowget++));
+			if ! curl -h &>/dev/null; then
+				err "Neither wget or curl are available. Please install one or download the wordlists yourself.";
+				exit 1;
+			fi
+		fi
+		if [ "${nowget}" -eq 0 ]; then
+			echo "Using wget to download wordlists...";
+			wget -q -P "${XDG_DATA_HOME}/diceware" https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt;
+			wget -q -P "${XDG_DATA_HOME}/diceware" https://eff.org/files/2016/09/08/eff_short_wordlist_2_0.txt;
+			echo "Done!"
+			((lists++));
+		else
+			echo "Using curl to download wordlists...";
+			curl -s --output-dir "${XDG_DATA_HOME}/diceware" https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt;
+			curl -s --output-dir "${XDG_DATA_HOME}/diceware" https://eff.org/files/2016/09/08/eff_short_wordlist_2_0.txt;
+			echo "Done!"
+			((lists++));
+		fi
+	fi
+	if [ ${lists} -eq 0 ]; then
+		err "Wordlists could not be found or downloaded."
+		exit 1
+	fi
+}
+
+parse-opts () {
+	if ! args=$(getopt -n "${0##*/}" -o d:hlsw: --long delim:,help,large,short,words: -- "$@"); then
+		usage;
+		exit 1
+	fi
+	eval set -- "${args}";
+	while true; do
+		case "$1" in
+			-s|--short)
+				if [ $action = 'def' ]; then
+					action='short'; shift;
+				else
+					err "Short and Large options are mutually exclusive!";
+					usage;
+					exit 1;
+				fi;;
+			-l|--large)
+				if [ $action = 'def' ]; then
+					action='large'; shift;
+				else
+					err "Short and Large options are mutually exclusive!";
+					usage;
+					exit 1;
+				fi;;
+			-d|--delim)
+				delim=$2; shift 2;;
+			-w|--words)
+				wordnum=$2; shift 2;;
+			-h|--help)
+				usage; exit 0;;
+			--) 
+				shift; break;;
+			*) err "Failed to parse options."; exit 1 ;;
+		esac
+	done
+}
+
+words='Empty';
+delim=' ';
+action='def';
+wordnum=6;
+
+check-deps
+parse-opts "$@"
+
+case $action in
+	'def') words=$(shuf -n"${wordnum}" ~/.local/share/diceware/eff_large_wordlist.txt | cut -f2 | tr '\n' "${delim}");;
+	'short') words=$(shuf -n"${wordnum}" ~/.local/share/diceware/eff_short_wordlist_2_0.txt | cut -f2 | tr '\n' "${delim}");;
+	'large') words=$(shuf -n"${wordnum}" ~/.local/share/diceware/eff_large_wordlist.txt | cut -f2 | tr '\n' "${delim}");;
+	*) err "Action is set to unexpected value"; exit 1;;
+esac;
+echo "${words::-1}";
+exit 0;
